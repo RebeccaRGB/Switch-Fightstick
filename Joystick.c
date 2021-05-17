@@ -26,70 +26,9 @@ these buttons for our use.
 
 #include "Joystick.h"
 
-/*
-The following ButtonMap variable defines all possible buttons within the
-original 13 bits of space, along with attempting to investigate the remaining
-3 bits that are 'unused'. This is what led to finding that the 'Capture'
-button was operational on the stick.
-*/
-uint16_t ButtonMap[16] = {
-	0x01,
-	0x02,
-	0x04,
-	0x08,
-	0x10,
-	0x20,
-	0x40,
-	0x80,
-	0x100,
-	0x200,
-	0x400,
-	0x800,
-	0x1000,
-	0x2000,
-	0x4000,
-	0x8000,
-};
-
-/*** Debounce ****
-The following is some -really bad- debounce code. I have a more robust library
-that I've used in other personal projects that would be a much better use
-here, especially considering that this is a stick indented for use with arcade
-fighters.
-
-This code exists solely to actually test on. This will eventually be replaced.
-**** Debounce ***/
-// Quick debounce hackery!
-// We're going to capture each port separately and store the contents into a 32-bit value.
-uint32_t pb_debounce = 0;
-uint32_t pd_debounce = 0;
-
-// We also need a port state capture. We'll use a 16-bit value for this.
-uint16_t bd_state = 0;
-
-// We'll also give us some useful macros here.
-#define PINB_DEBOUNCED ((bd_state >> 0) & 0xFF)
-#define PIND_DEBOUNCED ((bd_state >> 8) & 0xFF) 
-
-// So let's do some debounce! Lazily, and really poorly.
-void debounce_ports(void) {
-	// We'll shift the current value of the debounce down one set of 8 bits. We'll also read in the state of the pins.
-	pb_debounce = (pb_debounce << 8) + PINB;
-	pd_debounce = (pd_debounce << 8) + PIND;
-
-	// We'll then iterate through a simple for loop.
-	for (int i = 0; i < 8; i++) {
-		if ((pb_debounce & (0x1010101 << i)) == (0x1010101 << i)) // wat
-			bd_state |= (1 << i);
-		else if ((pb_debounce & (0x1010101 << i)) == (0))
-			bd_state &= ~(uint16_t)(1 << i);
-
-		if ((pd_debounce & (0x1010101 << i)) == (0x1010101 << i))
-			bd_state |= (1 << (8 + i));
-		else if ((pd_debounce & (0x1010101 << i)) == (0))
-			bd_state &= ~(uint16_t)(1 << (8 + i));
-	}
-}
+// Joystick HID input report.
+static uint8_t report[sizeof(USB_JoystickReport_Input_t)] = {0, 0, 8, 128, 128, 128, 128, 0};
+static uint8_t reportPtr = 0;
 
 // Main entry point.
 int main(void) {
@@ -104,9 +43,14 @@ int main(void) {
 		HID_Task();
 		// We also need to run the main USB management task.
 		USB_USBTask();
-		// As part of this loop, we'll also run our bad debounce code.
-		// Optimally, we should replace this with something that fires on a timer.
-		debounce_ports();
+		// Read report data from serial.
+		for (;;) {
+			int16_t dataByte = Serial_ReceiveByte();
+			if (dataByte < 0) break;
+			// For some reason the endianness of the buttons gets switched?!?!?
+			report[(reportPtr < 2) ? (reportPtr ^ 1) : reportPtr] = dataByte;
+			if (++reportPtr >= sizeof(USB_JoystickReport_Input_t)) reportPtr = 0;
+		}
 	}
 }
 
@@ -120,12 +64,9 @@ void SetupHardware(void) {
 	clock_prescale_set(clock_div_1);
 	// We can then initialize our hardware and peripherals, including the USB stack.
 
-	// Both PORTD and PORTB will be used for handling the buttons and stick.
-	DDRD  &= ~0xFF;
-	PORTD |=  0xFF;
+	// Start serial port
+	Serial_Init(9600, false);
 
-	DDRB  &= ~0xFF;
-	PORTB |=  0xFF;
 	// The USB stack should be initialized last.
 	USB_Init();
 }
@@ -236,61 +177,6 @@ void HID_Task(void) {
 
 // Prepare the next report for the host.
 void GetNextReport(USB_JoystickReport_Input_t* const ReportData) {
-	// All of this code here is handled -really poorly-, and should be replaced with something a bit more production-worthy.
-	uint16_t buf_button   = 0x00;
-	uint8_t  buf_joystick = 0x00;
-
-	/* Clear the report contents */
-	memset(ReportData, 0, sizeof(USB_JoystickReport_Input_t));
-
-	buf_button   = (~PIND_DEBOUNCED & 0xFF) << (~PINB_DEBOUNCED & 0x08 ? 8 : 0);
-	buf_joystick = (~PINB_DEBOUNCED & 0xFF);
-
-	for (int i = 0; i < 16; i++) {
-		if (buf_button & (1 << i))
-			ReportData->Button |= ButtonMap[i];
-	}
-
-	if (buf_joystick & 0x10)
-		ReportData->LX = 0;
-	else if (buf_joystick & 0x20)
-		ReportData->LX = 255;
-	else
-		ReportData->LX = 128;
-
-	if (buf_joystick & 0x80)
-		ReportData->LY = 0;
-	else if (buf_joystick & 0x40)
-		ReportData->LY = 255;
-	else
-		ReportData->LY = 128;
-
-	switch(buf_joystick & 0xF0) {
-		case 0x80: // Top
-			ReportData->HAT = 0x00;
-			break;
-		case 0xA0: // Top-Right
-			ReportData->HAT = 0x01;
-			break;
-		case 0x20: // Right
-			ReportData->HAT = 0x02;
-			break;
-		case 0x60: // Bottom-Right
-			ReportData->HAT = 0x03;
-			break;
-		case 0x40: // Bottom
-			ReportData->HAT = 0x04;
-			break;
-		case 0x50: // Bottom-Left
-			ReportData->HAT = 0x05;
-			break;
-		case 0x10: // Left
-			ReportData->HAT = 0x06;
-			break;
-		case 0x90: // Top-Left
-			ReportData->HAT = 0x07;
-			break;
-		default:
-			ReportData->HAT = 0x08;
-	}
+	// Respond with report data read from serial port.
+	memcpy(ReportData, report, sizeof(USB_JoystickReport_Input_t));
 }
