@@ -1,6 +1,8 @@
 ## Switch-Fightstick
 Proof-of-Concept Fightstick for the Nintendo Switch. Uses the LUFA library and reverse-engineering of the Pokken Tournament Pro Pad for the Wii U to enable custom fightsticks on the Switch System v3.0.0.
 
+**This specific fork of Switch-Fightstick reconstructs the firmware for ItsDeidara's [CommunityController](https://github.com/ItsDeidara/CommunityController) project. It can be used to control a Switch from a computer using a USB-to-serial adapter. This firmware is also used in the [Animal Prints](https://github.com/kreativekorp/animal-prints) project.**
+
 ### Wait, what?
 On June 20, 2017, Nintendo released System Update v3.0.0 for the Nintendo Switch. Along with a number of additional features that were advertised or noted in the changelog, additional hidden features were added. One of those features allows for the use of compatible controllers, such as the Pokken Tournament Pro Pad, to be used on the Nintendo Switch.
 
